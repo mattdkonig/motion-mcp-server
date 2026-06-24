@@ -167,9 +167,9 @@ export class ClassPassSession {
       await this.browser.navigate(`https://classpass.com/classes/${encodeURIComponent(classId)}`);
       await this.browser.click('[data-testid="BookButton"]');
       const page = await this.browser.getPage();
-      const confirmButton = await page.$('[data-testid="ConfirmBooking"]');
+      const confirmButton = await page.waitForSelector('[data-testid="ConfirmBooking"]', { timeout: 5000 }).catch(() => null);
       if (confirmButton) {
-        await confirmButton.click({ timeout: 5000 });
+        await confirmButton.click();
       }
       await page.waitForTimeout(3000);
       const booking = await this.browser.evaluate<Booking>(() => {

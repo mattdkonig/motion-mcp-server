@@ -1,135 +1,104 @@
 # ClassPass Remote MCP Server
 
-This is a remote HTTP MCP server for ClassPass. It exposes ClassPass browser automation tools over Streamable HTTP at:
+This is a local HTTP MCP server for ClassPass. It drives a real Playwright Chromium browser from your machine, reuses a saved ClassPass browser session, and exposes the MCP endpoint through a public tunnel at an unguessable secret path:
 
 ```text
-https://<host>/mcp
+https://<tunnel-host>/<MCP_SECRET>/mcp
 ```
+
+Claude connector OAuth fields should be left blank. The endpoint privacy comes from the unguessable `MCP_SECRET` path.
 
 ## Environment variables
 
 - `PORT` - HTTP port for the server. Defaults to `3000`.
-- `AUTH_PASSWORD` - password shown in the OAuth authorization form. Required for Claude/Cursor OAuth login.
-- `MCP_AUTH_TOKEN` - optional legacy static bearer token for direct MCP requests. Generate one with:
-
-  ```sh
-  openssl rand -hex 32
-  ```
-
-- `CLASSPASS_EMAIL` - optional ClassPass email for automatic login.
-- `CLASSPASS_PASSWORD` - optional ClassPass password for automatic login.
+- `MCP_SECRET` - unguessable path segment for the MCP URL. If unset, the server generates one at startup and logs it.
 - `CLASSPASS_STORAGE_STATE` - Playwright storage-state path for a persisted ClassPass session. Defaults to `./data/state.json`.
 - `HEADFUL` - set to `1` to launch Chromium with a visible window.
+- `CLASSPASS_EMAIL` / `CLASSPASS_PASSWORD` - optional fallback login credentials. The recommended path is saved browser session state, not password login.
 
-Always set `AUTH_PASSWORD`; ClassPass credentials live on the host when automatic login is enabled.
+## Recommended: one-command local + tunnel setup
 
-## Recommended: run locally + Cloudflare Tunnel
+From the repository root:
 
-ClassPass is protected by Cloudflare bot checks that often block datacenter IPs. The strongest workaround is to run this MCP server on your own computer, complete a one-time manual login from your residential IP, and expose the local server through a Cloudflare Tunnel.
+```sh
+bash classpass-mcp-remote/deploy-classpass-mcp.sh
+```
 
-1. Install dependencies and Chromium:
+The script:
 
-   ```sh
-   npm install
-   npx playwright install chromium
-   ```
+1. Installs dependencies and Playwright Chromium.
+2. Generates an unguessable `MCP_SECRET`.
+3. Runs `npm run login` so you can manually log in to ClassPass in a visible browser and solve any Cloudflare "Just a moment" challenge.
+4. Saves the authenticated browser session to `./data/state.json`.
+5. Starts the local MCP server.
+6. Starts a public tunnel with `cloudflared`, falling back to `localhost.run` over SSH if `cloudflared` is unavailable.
+7. Self-tests MCP initialize through the public tunnel.
+8. Prints the final connector URL:
 
-2. Complete the one-time manual ClassPass login:
+```text
+https://<tunnel-host>/<MCP_SECRET>/mcp
+```
 
-   ```sh
-   npm run login
-   ```
+Add that URL to Claude as a custom connector and leave OAuth fields blank.
 
-   A visible Chromium window opens at ClassPass. Log in manually and solve any Cloudflare "Just a moment" challenge. When login is detected, the script saves the authenticated session to `./data/state.json`.
+Keep the script terminal open. The local server and tunnel stop when the script exits. Free tunnel URLs rotate when restarted.
 
-3. Start the local MCP server:
+## Manual local setup
 
-   ```sh
-   export AUTH_PASSWORD="choose-a-local-authorization-password"
-   export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
-   npm start
-   ```
+If you prefer to run each step yourself:
 
-   The server listens on `http://localhost:3000` and keeps the OAuth layer enabled. It loads `./data/state.json` automatically, verifies the saved session against `https://classpass.com/account/credits`, and only falls back to `CLASSPASS_EMAIL` / `CLASSPASS_PASSWORD` if no valid saved session exists.
+```sh
+cd classpass-mcp-remote
+npm install
+npx playwright install chromium
+npm run login
+```
 
-4. Expose it with a quick Cloudflare Tunnel:
+Then start the server:
 
-   ```sh
-   cloudflared tunnel --url http://localhost:3000
-   ```
+```sh
+export MCP_SECRET="$(openssl rand -hex 16)"
+export PORT=3000
+npm start
+```
 
-   Cloudflared prints a public `https://...trycloudflare.com` URL. Your MCP endpoint is:
+Expose it with a quick Cloudflare Tunnel:
 
-   ```text
-   https://<tunnel-url>/mcp
-   ```
+```sh
+cloudflared tunnel --url http://localhost:3000
+```
 
-5. For a stable hostname, create a named tunnel:
+Or use `localhost.run` if you do not have `cloudflared`:
 
-   ```sh
-   cloudflared tunnel login
-   cloudflared tunnel create classpass-mcp
-   cloudflared tunnel route dns classpass-mcp classpass-mcp.example.com
-   cloudflared tunnel run --url http://localhost:3000 classpass-mcp
-   ```
+```sh
+ssh -o StrictHostKeyChecking=accept-new -R 80:localhost:3000 nokey@localhost.run
+```
 
-   Your stable MCP endpoint is:
+Your connector URL is:
 
-   ```text
-   https://classpass-mcp.example.com/mcp
-   ```
-
-6. Add the `/mcp` URL as a custom connector in Claude. Claude discovers the OAuth metadata, opens the authorize screen, and asks for `AUTH_PASSWORD`.
-
-Your computer must stay awake and the local server plus tunnel must keep running for Claude/Cursor to use the connector. The `./data/state.json` file contains an authenticated ClassPass browser session; keep it private and never commit it.
-
-## OAuth endpoints
-
-The MCP endpoint is protected by OAuth 2.1 with PKCE and dynamic client registration:
-
-- `GET /.well-known/oauth-protected-resource`
-- `GET /.well-known/oauth-authorization-server`
-- `POST /register`
-- `GET /authorize`
-- `POST /authorize`
-- `POST /token`
-
-The authorization endpoint renders a simple password form. Enter `AUTH_PASSWORD` to approve the OAuth client. The server stores OAuth clients, authorization codes, and tokens in memory, which is intended for a single-user personal service.
+```text
+https://<tunnel-host>/<MCP_SECRET>/mcp
+```
 
 ## Claude custom connector
 
-Add a custom connector with the MCP URL:
+Add a custom connector with the secret MCP URL:
 
 ```text
-https://<host>/mcp
+https://<tunnel-host>/<MCP_SECRET>/mcp
 ```
 
-Claude discovers OAuth metadata from the server, dynamically registers a public PKCE client, and opens the authorization page. Enter the `AUTH_PASSWORD` value in the form.
+Leave OAuth fields blank.
 
 ## Cursor `mcp.json`
 
-For OAuth-capable Cursor clients, add the remote MCP URL and complete the authorization flow in the browser:
+Add the secret URL directly:
 
 ```json
 {
   "mcpServers": {
     "classpass": {
-      "url": "https://<host>/mcp"
-    }
-  }
-}
-```
-
-For legacy static-token clients, `MCP_AUTH_TOKEN` is still accepted:
-
-```json
-{
-  "mcpServers": {
-    "classpass": {
-      "url": "https://<host>/mcp",
-      "headers": {
-        "Authorization": "Bearer <MCP_AUTH_TOKEN>"
-      }
+      "url": "https://<tunnel-host>/<MCP_SECRET>/mcp"
     }
   }
 }
@@ -137,4 +106,4 @@ For legacy static-token clients, `MCP_AUTH_TOKEN` is still accepted:
 
 ## Caveats
 
-ClassPass does not provide a public API, so this server drives a headless Chromium browser with Playwright. Host it on a paid tier that supports long-running browser processes. Browser automation against ClassPass may violate ClassPass terms of service or break when the website changes. Protect the endpoint with OAuth and `AUTH_PASSWORD`, and add `CLASSPASS_EMAIL` / `CLASSPASS_PASSWORD` only in a trusted host dashboard.
+ClassPass does not provide a public API, so this server drives Chromium with Playwright. ClassPass is also behind Cloudflare bot protection. Render and other datacenter deployments cannot reliably pass that challenge, so the old Render-hosted flow is deprecated for actual ClassPass use. Run this locally from your residential IP, complete the manual login once, and keep `./data/state.json` private because it contains an authenticated ClassPass browser session.

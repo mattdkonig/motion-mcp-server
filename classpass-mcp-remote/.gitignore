@@ -1,0 +1,4 @@
+data/
+state.json
+*.state.json
+*storage-state*.json

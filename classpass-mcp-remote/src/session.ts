@@ -1,5 +1,10 @@
 import { ClassPassBrowser } from "./browser.js";
 
+type SessionOptions = {
+  storageStatePath?: string;
+  headful?: boolean;
+};
+
 type SearchClassesArgs = {
   location: string;
   date: string;
@@ -71,13 +76,40 @@ function getErrorMessage(error: unknown): string {
 export class ClassPassSession {
   public isLoggedIn = false;
   private browser = new ClassPassBrowser();
+  private storageStatePath?: string;
+  private headful: boolean;
+
+  constructor(options: SessionOptions = {}) {
+    this.storageStatePath = options.storageStatePath;
+    this.headful = options.headful ?? false;
+  }
 
   async initialize(): Promise<void> {
     try {
-      await this.browser.initialize();
+      await this.browser.initialize({
+        storageStatePath: this.storageStatePath,
+        headful: this.headful,
+      });
     } catch (error) {
       this.isLoggedIn = false;
       throw error;
+    }
+  }
+
+  async restoreSavedSession(): Promise<{ success: boolean; message: string }> {
+    try {
+      await this.browser.navigate("https://classpass.com/account/credits");
+      const page = await this.browser.getPage();
+      await page.waitForTimeout(3000);
+      const currentUrl = page.url();
+      const isLoginPage = /\/login(?:[/?#]|$)/.test(currentUrl);
+      this.isLoggedIn = !isLoginPage;
+      return this.isLoggedIn
+        ? { success: true, message: "Loaded saved ClassPass session." }
+        : { success: false, message: "Saved ClassPass session is not logged in." };
+    } catch (error) {
+      this.isLoggedIn = false;
+      return { success: false, message: `Saved session check failed: ${getErrorMessage(error)}` };
     }
   }
 
@@ -93,11 +125,16 @@ export class ClassPassSession {
       const page = await this.browser.getPage();
       await page.waitForTimeout(3000);
       this.isLoggedIn = true;
+      if (this.storageStatePath) await this.browser.saveStorageState(this.storageStatePath);
       return { success: true, message: "Logged in to ClassPass." };
     } catch (error) {
       this.isLoggedIn = false;
       return { success: false, message: `Login failed: ${getErrorMessage(error)}` };
     }
+  }
+
+  async saveStorageState(path?: string): Promise<void> {
+    await this.browser.saveStorageState(path || this.storageStatePath || "./data/state.json");
   }
 
   async searchClasses(args: SearchClassesArgs): Promise<{ classes: ClassSummary[] }> {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import express, { NextFunction, Request, Response } from "express";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -12,6 +13,8 @@ const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 const CP_EMAIL = process.env.CLASSPASS_EMAIL || "";
 const CP_PASSWORD = process.env.CLASSPASS_PASSWORD || "";
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "";
+const STORAGE_STATE_PATH = process.env.CLASSPASS_STORAGE_STATE || "./data/state.json";
+const HEADFUL = process.env.HEADFUL === "1";
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -170,8 +173,12 @@ function requireMcpAuth(req: Request, res: Response, next: NextFunction): void {
 let session: ClassPassSession | null = null;
 async function ensureSession(): Promise<ClassPassSession> {
   if (session && session.isLoggedIn) return session;
-  session = new ClassPassSession();
+  session = new ClassPassSession({ storageStatePath: STORAGE_STATE_PATH, headful: HEADFUL });
   await session.initialize();
+  if (existsSync(STORAGE_STATE_PATH)) {
+    const restoreResult = await session.restoreSavedSession();
+    if (restoreResult.success) return session;
+  }
   if (CP_EMAIL && CP_PASSWORD) {
     const loginResult = await session.login(CP_EMAIL, CP_PASSWORD);
     if (!loginResult.success) throw new Error(`Auto-login failed: ${loginResult.message}`);

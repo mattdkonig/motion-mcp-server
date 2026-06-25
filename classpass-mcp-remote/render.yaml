@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: classpass-mcp-remote
+    runtime: docker
+    plan: starter
+    rootDir: classpass-mcp-remote
+    healthCheckPath: /health
+    envVars:
+      - key: MCP_AUTH_TOKEN
+        generateValue: true
+      - key: CLASSPASS_EMAIL
+        sync: false
+      - key: CLASSPASS_PASSWORD
+        sync: false

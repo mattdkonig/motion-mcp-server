@@ -9,7 +9,8 @@ https://<host>/mcp
 ## Environment variables
 
 - `PORT` - HTTP port for the server. Defaults to `3000`.
-- `MCP_AUTH_TOKEN` - bearer token required for MCP requests. Generate one with:
+- `AUTH_PASSWORD` - password shown in the OAuth authorization form. Required for Claude/Cursor OAuth login.
+- `MCP_AUTH_TOKEN` - optional legacy static bearer token for direct MCP requests. Generate one with:
 
   ```sh
   openssl rand -hex 32
@@ -18,7 +19,20 @@ https://<host>/mcp
 - `CLASSPASS_EMAIL` - optional ClassPass email for automatic login.
 - `CLASSPASS_PASSWORD` - optional ClassPass password for automatic login.
 
-Always set `MCP_AUTH_TOKEN`; ClassPass credentials live on the host when automatic login is enabled.
+Always set `AUTH_PASSWORD`; ClassPass credentials live on the host when automatic login is enabled.
+
+## OAuth endpoints
+
+The MCP endpoint is protected by OAuth 2.1 with PKCE and dynamic client registration:
+
+- `GET /.well-known/oauth-protected-resource`
+- `GET /.well-known/oauth-authorization-server`
+- `POST /register`
+- `GET /authorize`
+- `POST /authorize`
+- `POST /token`
+
+The authorization endpoint renders a simple password form. Enter `AUTH_PASSWORD` to approve the OAuth client. The server stores OAuth clients, authorization codes, and tokens in memory, which is intended for a single-user personal service.
 
 ## Claude custom connector
 
@@ -28,15 +42,23 @@ Add a custom connector with the MCP URL:
 https://<host>/mcp
 ```
 
-Set the Authorization header to:
-
-```text
-Bearer <MCP_AUTH_TOKEN>
-```
+Claude discovers OAuth metadata from the server, dynamically registers a public PKCE client, and opens the authorization page. Enter the `AUTH_PASSWORD` value in the form.
 
 ## Cursor `mcp.json`
 
-Add an HTTP MCP server entry:
+For OAuth-capable Cursor clients, add the remote MCP URL and complete the authorization flow in the browser:
+
+```json
+{
+  "mcpServers": {
+    "classpass": {
+      "url": "https://<host>/mcp"
+    }
+  }
+}
+```
+
+For legacy static-token clients, `MCP_AUTH_TOKEN` is still accepted:
 
 ```json
 {
@@ -53,4 +75,4 @@ Add an HTTP MCP server entry:
 
 ## Caveats
 
-ClassPass does not provide a public API, so this server drives a headless Chromium browser with Playwright. Host it on a paid tier that supports long-running browser processes. Browser automation against ClassPass may violate ClassPass terms of service or break when the website changes. Protect the endpoint with `MCP_AUTH_TOKEN` and add `CLASSPASS_EMAIL` / `CLASSPASS_PASSWORD` only in a trusted host dashboard.
+ClassPass does not provide a public API, so this server drives a headless Chromium browser with Playwright. Host it on a paid tier that supports long-running browser processes. Browser automation against ClassPass may violate ClassPass terms of service or break when the website changes. Protect the endpoint with OAuth and `AUTH_PASSWORD`, and add `CLASSPASS_EMAIL` / `CLASSPASS_PASSWORD` only in a trusted host dashboard.

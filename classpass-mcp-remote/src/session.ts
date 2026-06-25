@@ -75,8 +75,9 @@ export class ClassPassSession {
   async initialize(): Promise<void> {
     try {
       await this.browser.initialize();
-    } catch {
+    } catch (error) {
       this.isLoggedIn = false;
+      throw error;
     }
   }
 

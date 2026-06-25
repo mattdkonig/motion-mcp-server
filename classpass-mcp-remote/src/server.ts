@@ -30,7 +30,10 @@ async function ensureSession(): Promise<ClassPassSession> {
   if (session && session.isLoggedIn) return session;
   session = new ClassPassSession();
   await session.initialize();
-  if (CP_EMAIL && CP_PASSWORD) await session.login(CP_EMAIL, CP_PASSWORD);
+  if (CP_EMAIL && CP_PASSWORD) {
+    const loginResult = await session.login(CP_EMAIL, CP_PASSWORD);
+    if (!loginResult.success) throw new Error(`Auto-login failed: ${loginResult.message}`);
+  }
   return session;
 }
 function text(obj: unknown) { return { content: [{ type: "text" as const, text: JSON.stringify(obj, null, 2) }] }; }

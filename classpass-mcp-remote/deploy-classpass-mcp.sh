@@ -16,6 +16,7 @@ die() { printf '%s\n' "${RED}${BOLD}ERROR:${RESET} $*" >&2; exit 1; }
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${PORT:-8080}"
 STATE_PATH="${CLASSPASS_STORAGE_STATE:-./data/state.json}"
+NAMED_TUNNEL="${CLOUDFLARED_TUNNEL_NAME:-classpass-mcp}"
 SERVER_LOG="${PROJECT_DIR}/data/server.log"
 TUNNEL_LOG="${PROJECT_DIR}/data/tunnel.log"
 SERVER_PID=""
@@ -64,6 +65,35 @@ wait_for_tunnel_url() {
       return 0
     fi
     sleep 1
+  done
+  return 1
+}
+
+named_tunnel_exists() {
+  command -v cloudflared >/dev/null 2>&1 || return 1
+  cloudflared tunnel list 2>/dev/null | awk -v name="${NAMED_TUNNEL}" 'NR > 1 && $2 == name { found = 1 } END { exit found ? 0 : 1 }'
+}
+
+configured_named_tunnel_hostname() {
+  local config hostname
+  for config in "${CLOUDFLARED_CONFIG:-}" "${HOME}/.cloudflared/config.yml" "${HOME}/.cloudflared/config.yaml"; do
+    [[ -n "${config}" && -f "${config}" ]] || continue
+    hostname="$(
+      awk '
+        $1 == "hostname:" {
+          host = $2
+          gsub(/["'\'']/, "", host)
+          if (host != "" && host != "*") {
+            print host
+            exit
+          }
+        }
+      ' "${config}"
+    )"
+    if [[ -n "${hostname}" ]]; then
+      printf '%s\n' "${hostname}"
+      return 0
+    fi
   done
   return 1
 }
@@ -123,24 +153,45 @@ ok "Server is healthy"
 
 say "Starting public tunnel"
 : >"${TUNNEL_LOG}"
+PUBLIC_URL=""
+TUNNEL_MODE=""
 if command -v cloudflared >/dev/null 2>&1; then
-  say "Using cloudflared quick tunnel"
-  cloudflared tunnel --url "http://localhost:${PORT}" >"${TUNNEL_LOG}" 2>&1 &
-  TUNNEL_PID="$!"
+  if named_tunnel_exists; then
+    STABLE_HOSTNAME="$(configured_named_tunnel_hostname || true)"
+    if [[ -n "${STABLE_HOSTNAME}" ]]; then
+      say "Using existing cloudflared named tunnel '${NAMED_TUNNEL}'"
+      cloudflared tunnel run "${NAMED_TUNNEL}" >"${TUNNEL_LOG}" 2>&1 &
+      TUNNEL_PID="$!"
+      PUBLIC_URL="https://${STABLE_HOSTNAME}"
+      TUNNEL_MODE="named"
+    else
+      warn "Found named tunnel '${NAMED_TUNNEL}', but no hostname was found in ~/.cloudflared/config.yml; using quick tunnel."
+    fi
+  fi
+
+  if [[ -z "${PUBLIC_URL}" ]]; then
+    say "Using cloudflared quick tunnel"
+    cloudflared tunnel --url "http://localhost:${PORT}" >"${TUNNEL_LOG}" 2>&1 &
+    TUNNEL_PID="$!"
+    TUNNEL_MODE="quick"
+  fi
 else
   warn "cloudflared not found; falling back to localhost.run over ssh"
   command -v ssh >/dev/null 2>&1 || die "ssh is required for localhost.run fallback."
   ssh -o StrictHostKeyChecking=accept-new -R "80:localhost:${PORT}" nokey@localhost.run >"${TUNNEL_LOG}" 2>&1 &
   TUNNEL_PID="$!"
+  TUNNEL_MODE="localhost.run"
 fi
 
-PUBLIC_URL="$(wait_for_tunnel_url)" || {
-  warn "Tunnel log:"
-  sed -n '1,160p' "${TUNNEL_LOG}" >&2 || true
-  die "Could not detect a public tunnel URL."
-}
+if [[ -z "${PUBLIC_URL}" ]]; then
+  PUBLIC_URL="$(wait_for_tunnel_url)" || {
+    warn "Tunnel log:"
+    sed -n '1,160p' "${TUNNEL_LOG}" >&2 || true
+    die "Could not detect a public tunnel URL."
+  }
+fi
 CONNECTOR_URL="${PUBLIC_URL}/${MCP_SECRET}/mcp"
-ok "Tunnel is available at ${PUBLIC_URL}"
+ok "Tunnel is available at ${PUBLIC_URL} (${TUNNEL_MODE})"
 
 say "Self-testing MCP initialize through the public tunnel"
 self_test_mcp "${CONNECTOR_URL}" || {
@@ -163,7 +214,7 @@ Paste this connector URL into Claude:
 OAuth fields: leave blank.
 
 Keep this terminal open. The local MCP server and tunnel stop when this script exits.
-Free tunnel URLs rotate when restarted, so rerun this script if the URL stops working.
+Quick/free tunnel URLs rotate when restarted. A configured cloudflared named tunnel keeps a stable hostname.
 EOF
 
 wait "${TUNNEL_PID}"

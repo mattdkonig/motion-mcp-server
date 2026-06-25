@@ -43,6 +43,50 @@ Add that URL to Claude as a custom connector and leave OAuth fields blank.
 
 Keep the script terminal open. The local server and tunnel stop when the script exits. Free tunnel URLs rotate when restarted.
 
+## Stable URL (optional, recommended for keep-it-running)
+
+Quick tunnels are zero-config, but their public URLs rotate when restarted. For a stable connector URL, use a Cloudflare named tunnel. This requires a domain that is already on Cloudflare. If you do not have one, keep using the quick tunnel path above.
+
+Authenticate cloudflared and create the named tunnel:
+
+```sh
+cloudflared tunnel login
+cloudflared tunnel create classpass-mcp
+cloudflared tunnel route dns classpass-mcp classpass-mcp.<their-domain>
+```
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-uuid-or-classpass-mcp>
+credentials-file: /Users/<you>/.cloudflared/<tunnel-uuid>.json
+
+ingress:
+  - hostname: classpass-mcp.<their-domain>
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+Run the named tunnel:
+
+```sh
+cloudflared tunnel run classpass-mcp
+```
+
+For a background service that can survive reboots:
+
+```sh
+cloudflared service install
+```
+
+With the local MCP server running, the permanent connector URL is:
+
+```text
+https://classpass-mcp.<their-domain>/<MCP_SECRET>/mcp
+```
+
+OAuth fields stay blank. The one-command script detects an existing `classpass-mcp` named tunnel and a configured hostname in `~/.cloudflared/config.yml`; if found, it uses the stable URL automatically. Otherwise it falls back to a quick tunnel or localhost.run.
+
 ## Manual local setup
 
 If you prefer to run each step yourself:

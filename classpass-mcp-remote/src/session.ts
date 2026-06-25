@@ -84,9 +84,11 @@ export class ClassPassSession {
   async login(email: string, password: string): Promise<{ success: boolean; message: string }> {
     try {
       await this.browser.navigate("https://classpass.com/login");
-      await this.browser.waitForSelector('input[name="email"]');
-      await this.browser.fill('input[name="email"]', email);
-      await this.browser.fill('input[name="password"]', password);
+      const emailSelector = 'input[name="email"], input[type="email"]';
+      const passwordSelector = 'input[name="password"], input[type="password"]';
+      await this.browser.waitForSelector(emailSelector, 60000);
+      await this.browser.fill(emailSelector, email);
+      await this.browser.fill(passwordSelector, password);
       await this.browser.click('button[type="submit"]');
       const page = await this.browser.getPage();
       await page.waitForTimeout(3000);
